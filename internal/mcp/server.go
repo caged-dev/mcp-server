@@ -90,7 +90,7 @@ func (s *Server) ServeWebSocket(ctx context.Context, addr string) error {
 			s.logger.Error("websocket accept error", "error", err)
 			return
 		}
-		defer conn.CloseNow()
+		defer conn.CloseNow() //nolint:errcheck
 
 		s.handleWebSocket(ctx, conn)
 	})

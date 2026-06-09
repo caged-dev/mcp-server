@@ -115,7 +115,7 @@ func (t *FileListTool) Execute(_ context.Context, args json.RawMessage) mcp.Tool
 	var params struct {
 		Path string `json:"path"`
 	}
-	json.Unmarshal(args, &params)
+	_ = json.Unmarshal(args, &params)
 	if params.Path == "" {
 		params.Path = "."
 	}
@@ -212,7 +212,7 @@ func (t *FileSearchTool) Execute(_ context.Context, args json.RawMessage) mcp.To
 	}
 
 	var matches []string
-	filepath.Walk(t.workspace, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(t.workspace, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}

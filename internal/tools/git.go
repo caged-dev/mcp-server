@@ -48,7 +48,7 @@ func (t *GitDiffTool) Execute(ctx context.Context, args json.RawMessage) mcp.Too
 	var params struct {
 		Staged bool `json:"staged"`
 	}
-	json.Unmarshal(args, &params)
+	_ = json.Unmarshal(args, &params)
 
 	if params.Staged {
 		return runGit(ctx, t.workspace, "diff", "--cached")
@@ -77,7 +77,7 @@ func (t *GitLogTool) Execute(ctx context.Context, args json.RawMessage) mcp.Tool
 	var params struct {
 		Count int `json:"count"`
 	}
-	json.Unmarshal(args, &params)
+	_ = json.Unmarshal(args, &params)
 	if params.Count <= 0 {
 		params.Count = 10
 	}
