@@ -1,0 +1,75 @@
+version: 2
+
+project_name: caged-mcp-server
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/mcp-server
+    binary: caged-mcp-server
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: caged-mcp-server
+    repository:
+      owner: caged-dev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/caged-dev/mcp-server"
+    description: "Model Context Protocol server for AI coding agents"
+    license: "MIT"
+    test: |
+      system "#{bin}/caged-mcp-server", "--version"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/caged-dev/mcp-server:{{ .Version }}-amd64"
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+    goarch: amd64
+  - image_templates:
+      - "ghcr.io/caged-dev/mcp-server:{{ .Version }}-arm64"
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "ghcr.io/caged-dev/mcp-server:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/caged-dev/mcp-server:{{ .Version }}-amd64"
+      - "ghcr.io/caged-dev/mcp-server:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/caged-dev/mcp-server:latest"
+    image_templates:
+      - "ghcr.io/caged-dev/mcp-server:{{ .Version }}-amd64"
+      - "ghcr.io/caged-dev/mcp-server:{{ .Version }}-arm64"
