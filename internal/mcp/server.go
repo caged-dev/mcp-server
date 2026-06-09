@@ -74,7 +74,7 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 		if response != nil {
 			data, _ := json.Marshal(response)
 			data = append(data, '\n')
-			writer.Write(data)
+			_, _ = writer.Write(data)
 		}
 	}
 }
@@ -117,7 +117,7 @@ func (s *Server) handleWebSocket(ctx context.Context, conn *websocket.Conn) {
 		response := s.handleMessage(ctx, data)
 		if response != nil {
 			respData, _ := json.Marshal(response)
-			conn.Write(ctx, websocket.MessageText, respData)
+			_ = conn.Write(ctx, websocket.MessageText, respData)
 		}
 	}
 }
