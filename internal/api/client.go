@@ -173,6 +173,65 @@ func (c *Client) CancelRun(ctx context.Context, pipelineID, runID string) error 
 	return c.do(ctx, http.MethodPost, "/v1/pipelines/"+pipelineID+"/runs/"+runID+"/cancel", nil, nil)
 }
 
+// ---------- Pipeline State API Types ----------
+
+// StateEntry is a key/value entry in a pipeline run's state store.
+type StateEntry struct {
+	RunID     string `json:"run_id"`
+	Key       string `json:"key"`
+	Value     any    `json:"value"`
+	Type      string `json:"type,omitempty"`      // string, json, file, patch, artifact
+	MimeType  string `json:"mime_type,omitempty"` // For typed artifacts
+	SizeBytes int    `json:"size_bytes"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+	CreatedBy string `json:"created_by"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// SetStateRequest is the request body for setting a state entry.
+type SetStateRequest struct {
+	Value      any    `json:"value"`
+	Type       string `json:"type,omitempty"`
+	MimeType   string `json:"mime_type,omitempty"`
+	CreatedBy  string `json:"created_by,omitempty"`
+	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+}
+
+// ---------- Pipeline State API Methods ----------
+
+// ListState lists all state entries for a pipeline run.
+func (c *Client) ListState(ctx context.Context, pipelineID, runID string) ([]StateEntry, error) {
+	var entries []StateEntry
+	if err := c.do(ctx, http.MethodGet, "/v1/pipelines/"+pipelineID+"/runs/"+runID+"/state", nil, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// GetState gets a single state entry by key.
+func (c *Client) GetState(ctx context.Context, pipelineID, runID, key string) (*StateEntry, error) {
+	var entry StateEntry
+	if err := c.do(ctx, http.MethodGet, "/v1/pipelines/"+pipelineID+"/runs/"+runID+"/state/"+key, nil, &entry); err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+// SetState sets a state entry.
+func (c *Client) SetState(ctx context.Context, pipelineID, runID, key string, req *SetStateRequest) (*StateEntry, error) {
+	var entry StateEntry
+	if err := c.do(ctx, http.MethodPut, "/v1/pipelines/"+pipelineID+"/runs/"+runID+"/state/"+key, req, &entry); err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+// DeleteState deletes a state entry.
+func (c *Client) DeleteState(ctx context.Context, pipelineID, runID, key string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/pipelines/"+pipelineID+"/runs/"+runID+"/state/"+key, nil, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body any, result any) error {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc

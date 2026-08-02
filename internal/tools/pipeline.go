@@ -222,8 +222,8 @@ func (t *PipelineRunTool) Definition() mcp.ToolDefinition {
 				"repo":        map[string]string{"type": "string", "description": "Git repository URL to clone"},
 				"branch":      map[string]string{"type": "string", "description": "Git branch to checkout"},
 				"env": map[string]interface{}{
-					"type":        "object",
-					"description": "Environment variables to pass to stages",
+					"type":                 "object",
+					"description":          "Environment variables to pass to stages",
 					"additionalProperties": map[string]string{"type": "string"},
 				},
 			},
@@ -422,6 +422,223 @@ func (t *PipelineRunCancelTool) Execute(ctx context.Context, args json.RawMessag
 	return textResult(fmt.Sprintf("Run %s canceled successfully", params.RunID[:8]))
 }
 
+// ---------- Pipeline State Tools ----------
+
+// PipelineStateListTool lists state entries for a pipeline run.
+type PipelineStateListTool struct {
+	client *api.Client
+}
+
+func (t *PipelineStateListTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name:        "pipeline_state_list",
+		Description: "List all state entries for a pipeline run. State is a key/value store shared across stages.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pipeline_id": map[string]string{"type": "string", "description": "Pipeline ID (UUID)"},
+				"run_id":      map[string]string{"type": "string", "description": "Run ID (UUID)"},
+			},
+			"required": []string{"pipeline_id", "run_id"},
+		},
+	}
+}
+
+func (t *PipelineStateListTool) Execute(ctx context.Context, args json.RawMessage) mcp.ToolCallResult {
+	var params struct {
+		PipelineID string `json:"pipeline_id"`
+		RunID      string `json:"run_id"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return errorResult("invalid arguments: " + err.Error())
+	}
+	if params.PipelineID == "" || params.RunID == "" {
+		return errorResult("pipeline_id and run_id are required")
+	}
+
+	entries, err := t.client.ListState(ctx, params.PipelineID, params.RunID)
+	if err != nil {
+		return errorResult("listing state: " + err.Error())
+	}
+
+	if len(entries) == 0 {
+		return textResult("No state entries found for this run")
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d state entry(ies):\n\n", len(entries)))
+	for _, e := range entries {
+		typeStr := e.Type
+		if typeStr == "" {
+			typeStr = "string"
+		}
+		sb.WriteString(fmt.Sprintf("- **%s** [%s] %d bytes\n", e.Key, typeStr, e.SizeBytes))
+		sb.WriteString(fmt.Sprintf("  Created by: %s | Updated: %s\n", e.CreatedBy, e.UpdatedAt))
+		if e.ExpiresAt != "" {
+			sb.WriteString(fmt.Sprintf("  Expires: %s\n", e.ExpiresAt))
+		}
+	}
+	return textResult(sb.String())
+}
+
+// PipelineStateGetTool gets a state entry by key.
+type PipelineStateGetTool struct {
+	client *api.Client
+}
+
+func (t *PipelineStateGetTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name:        "pipeline_state_get",
+		Description: "Get a specific state entry by key from a pipeline run.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pipeline_id": map[string]string{"type": "string", "description": "Pipeline ID (UUID)"},
+				"run_id":      map[string]string{"type": "string", "description": "Run ID (UUID)"},
+				"key":         map[string]string{"type": "string", "description": "State entry key"},
+			},
+			"required": []string{"pipeline_id", "run_id", "key"},
+		},
+	}
+}
+
+func (t *PipelineStateGetTool) Execute(ctx context.Context, args json.RawMessage) mcp.ToolCallResult {
+	var params struct {
+		PipelineID string `json:"pipeline_id"`
+		RunID      string `json:"run_id"`
+		Key        string `json:"key"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return errorResult("invalid arguments: " + err.Error())
+	}
+	if params.PipelineID == "" || params.RunID == "" || params.Key == "" {
+		return errorResult("pipeline_id, run_id, and key are required")
+	}
+
+	entry, err := t.client.GetState(ctx, params.PipelineID, params.RunID, params.Key)
+	if err != nil {
+		return errorResult("getting state: " + err.Error())
+	}
+
+	// Format value as JSON.
+	valueJSON, _ := json.MarshalIndent(entry.Value, "", "  ")
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# State: %s\n\n", entry.Key))
+	sb.WriteString(fmt.Sprintf("**Type:** %s\n", entry.Type))
+	sb.WriteString(fmt.Sprintf("**Size:** %d bytes\n", entry.SizeBytes))
+	sb.WriteString(fmt.Sprintf("**Created by:** %s\n", entry.CreatedBy))
+	sb.WriteString(fmt.Sprintf("**Updated:** %s\n\n", entry.UpdatedAt))
+	if entry.ExpiresAt != "" {
+		sb.WriteString(fmt.Sprintf("**Expires:** %s\n\n", entry.ExpiresAt))
+	}
+	sb.WriteString("## Value\n\n```json\n")
+	sb.WriteString(string(valueJSON))
+	sb.WriteString("\n```")
+	return textResult(sb.String())
+}
+
+// PipelineStateSetTool sets a state entry.
+type PipelineStateSetTool struct {
+	client *api.Client
+}
+
+func (t *PipelineStateSetTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name:        "pipeline_state_set",
+		Description: "Set a state entry in a pipeline run. State is shared across all stages in the run.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pipeline_id": map[string]string{"type": "string", "description": "Pipeline ID (UUID)"},
+				"run_id":      map[string]string{"type": "string", "description": "Run ID (UUID)"},
+				"key":         map[string]string{"type": "string", "description": "State entry key (max 256 chars)"},
+				"value":       map[string]string{"type": "object", "description": "State value (JSON object, max 1MB)"},
+				"type":        map[string]string{"type": "string", "description": "Value type: string, json, file, patch, artifact"},
+				"ttl_seconds": map[string]string{"type": "integer", "description": "TTL in seconds (0 = no expiry, max 30 days)"},
+				"created_by":  map[string]string{"type": "string", "description": "Creator identifier (e.g., stage name)"},
+			},
+			"required": []string{"pipeline_id", "run_id", "key", "value"},
+		},
+	}
+}
+
+func (t *PipelineStateSetTool) Execute(ctx context.Context, args json.RawMessage) mcp.ToolCallResult {
+	var params struct {
+		PipelineID string `json:"pipeline_id"`
+		RunID      string `json:"run_id"`
+		Key        string `json:"key"`
+		Value      any    `json:"value"`
+		Type       string `json:"type"`
+		TTLSeconds int    `json:"ttl_seconds"`
+		CreatedBy  string `json:"created_by"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return errorResult("invalid arguments: " + err.Error())
+	}
+	if params.PipelineID == "" || params.RunID == "" || params.Key == "" {
+		return errorResult("pipeline_id, run_id, and key are required")
+	}
+
+	createdBy := params.CreatedBy
+	if createdBy == "" {
+		createdBy = "mcp"
+	}
+
+	entry, err := t.client.SetState(ctx, params.PipelineID, params.RunID, params.Key, &api.SetStateRequest{
+		Value:      params.Value,
+		Type:       params.Type,
+		CreatedBy:  createdBy,
+		TTLSeconds: params.TTLSeconds,
+	})
+	if err != nil {
+		return errorResult("setting state: " + err.Error())
+	}
+
+	return textResult(fmt.Sprintf("State entry set successfully!\n\n**Key:** %s\n**Size:** %d bytes", entry.Key, entry.SizeBytes))
+}
+
+// PipelineStateDeleteTool deletes a state entry.
+type PipelineStateDeleteTool struct {
+	client *api.Client
+}
+
+func (t *PipelineStateDeleteTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name:        "pipeline_state_delete",
+		Description: "Delete a state entry from a pipeline run.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"pipeline_id": map[string]string{"type": "string", "description": "Pipeline ID (UUID)"},
+				"run_id":      map[string]string{"type": "string", "description": "Run ID (UUID)"},
+				"key":         map[string]string{"type": "string", "description": "State entry key to delete"},
+			},
+			"required": []string{"pipeline_id", "run_id", "key"},
+		},
+	}
+}
+
+func (t *PipelineStateDeleteTool) Execute(ctx context.Context, args json.RawMessage) mcp.ToolCallResult {
+	var params struct {
+		PipelineID string `json:"pipeline_id"`
+		RunID      string `json:"run_id"`
+		Key        string `json:"key"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return errorResult("invalid arguments: " + err.Error())
+	}
+	if params.PipelineID == "" || params.RunID == "" || params.Key == "" {
+		return errorResult("pipeline_id, run_id, and key are required")
+	}
+
+	if err := t.client.DeleteState(ctx, params.PipelineID, params.RunID, params.Key); err != nil {
+		return errorResult("deleting state: " + err.Error())
+	}
+
+	return textResult(fmt.Sprintf("State entry '%s' deleted successfully", params.Key))
+}
+
 // NewPipelineTools creates all pipeline tools using the given API client.
 func NewPipelineTools(client *api.Client) []mcp.Tool {
 	return []mcp.Tool{
@@ -433,5 +650,10 @@ func NewPipelineTools(client *api.Client) []mcp.Tool {
 		&PipelineRunsListTool{client: client},
 		&PipelineRunGetTool{client: client},
 		&PipelineRunCancelTool{client: client},
+		// State tools.
+		&PipelineStateListTool{client: client},
+		&PipelineStateGetTool{client: client},
+		&PipelineStateSetTool{client: client},
+		&PipelineStateDeleteTool{client: client},
 	}
 }
