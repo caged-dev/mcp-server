@@ -50,6 +50,7 @@ func NewToolSet(workspace string, opts Options) *ToolSet {
 	// Pipeline tools if API client is configured.
 	if opts.APIClient != nil {
 		ts.tools = append(ts.tools, NewPipelineTools(opts.APIClient)...)
+		ts.tools = append(ts.tools, NewA2ATools(opts.APIClient)...)
 	}
 
 	return ts
