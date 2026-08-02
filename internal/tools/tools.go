@@ -2,6 +2,7 @@
 package tools
 
 import (
+	"github.com/caged-dev/mcp-server/internal/api"
 	"github.com/caged-dev/mcp-server/internal/mcp"
 )
 
@@ -9,6 +10,7 @@ import (
 type Options struct {
 	ReadOnly        bool
 	AllowedCommands []string
+	APIClient       *api.Client // Optional: for pipeline tools.
 }
 
 // ToolSet holds all available tools for a workspace.
@@ -43,6 +45,11 @@ func NewToolSet(workspace string, opts Options) *ToolSet {
 			&TerminalExecTool{workspace: workspace, allowed: opts.AllowedCommands},
 			&GitCommitTool{workspace: workspace},
 		)
+	}
+
+	// Pipeline tools if API client is configured.
+	if opts.APIClient != nil {
+		ts.tools = append(ts.tools, NewPipelineTools(opts.APIClient)...)
 	}
 
 	return ts

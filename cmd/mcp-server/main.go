@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/caged-dev/mcp-server/internal/api"
 	"github.com/caged-dev/mcp-server/internal/mcp"
 	"github.com/caged-dev/mcp-server/internal/tools"
 )
@@ -26,6 +27,8 @@ func main() {
 	allowedCmds := flag.String("allowed-commands", envOrDefault("CAGED_MCP_ALLOWED_COMMANDS", ""), "comma-separated allowed commands (empty = all)")
 	readOnly := flag.Bool("read-only", envBoolOrDefault("CAGED_MCP_READ_ONLY", false), "disable write/exec tools")
 	logLevel := flag.String("log-level", envOrDefault("CAGED_MCP_LOG_LEVEL", "info"), "log level")
+	apiURL := flag.String("api-url", envOrDefault("CAGED_API_URL", "https://api.caged.dev"), "Caged API URL (enables pipeline tools)")
+	apiKey := flag.String("api-key", envOrDefault("CAGED_API_KEY", ""), "Caged API key (enables pipeline tools)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -59,10 +62,18 @@ func main() {
 		allowed = strings.Split(*allowedCmds, ",")
 	}
 
-	toolSet := tools.NewToolSet(absWorkspace, tools.Options{
+	opts := tools.Options{
 		ReadOnly:        *readOnly,
 		AllowedCommands: allowed,
-	})
+	}
+
+	// Enable pipeline tools if API credentials are configured.
+	if *apiKey != "" {
+		opts.APIClient = api.NewClient(*apiURL, *apiKey)
+		logger.Info("pipeline tools enabled", "api_url", *apiURL)
+	}
+
+	toolSet := tools.NewToolSet(absWorkspace, opts)
 
 	// Create server.
 	server := mcp.NewServer(mcp.ServerConfig{
