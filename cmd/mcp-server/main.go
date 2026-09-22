@@ -77,9 +77,12 @@ func main() {
 
 	// Create server.
 	server := mcp.NewServer(mcp.ServerConfig{
-		Name:    "caged-mcp",
-		Version: version,
+		Name:         "caged-mcp",
+		Version:      version,
+		Instructions: "Filesystem, terminal and git tools scoped to a single workspace directory. All paths are relative to the workspace root; paths outside it are refused.",
 	}, logger, toolSet.All()...)
+
+	logger.Info("protocol versions", "supported", mcp.SupportedVersions())
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
