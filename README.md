@@ -1,4 +1,4 @@
-# caged-mcp
+# caged-mcp-server
 
 A standalone **Model Context Protocol (MCP)** server that exposes sandbox tools to AI coding agents. Compatible with Claude Code, Cursor, Aider, and any MCP-compatible client.
 
@@ -38,17 +38,36 @@ wired into their editors.*
 
 ## Installation
 
-```bash
-# Pre-built binary
-curl -fsSL https://github.com/caged-dev/mcp-server/releases/latest/download/caged-mcp-linux-amd64 -o /usr/local/bin/caged-mcp
-chmod +x /usr/local/bin/caged-mcp
+The released binary is called **`caged-mcp-server`**.
 
-# From source
-go install github.com/caged-dev/mcp-server@latest
+```bash
+# Pre-built binary (releases ship tar.gz archives, one per os/arch)
+VERSION=0.1.0
+curl -fsSL "https://github.com/caged-dev/mcp-server/releases/download/v${VERSION}/caged-mcp-server_${VERSION}_linux_amd64.tar.gz" \
+  | tar xz caged-mcp-server
+sudo install -m 0755 caged-mcp-server /usr/local/bin/caged-mcp-server
+
+# Homebrew
+brew install caged-dev/tap/caged-mcp-server
+
+# From source (note the /cmd/mcp-server suffix; this installs as `mcp-server`)
+go install github.com/caged-dev/mcp-server/cmd/mcp-server@latest
 
 # Docker
 docker pull ghcr.io/caged-dev/mcp-server:latest
 ```
+
+*Corrected 2026-09-22: every line above except the Docker one was wrong, and
+each was checked against the published artifacts before being changed.*
+`curl .../releases/latest/download/caged-mcp-linux-amd64` returned **404** —
+that asset name exists only on an abandoned draft release; the published
+release carries `caged-mcp-server_<version>_<os>_<arch>.tar.gz`.
+`go install github.com/caged-dev/mcp-server@latest` failed with *"module
+found, but does not contain package"*, because the module root holds no
+`main` package. And the binary inside the archive, and the one Homebrew
+installs, is `caged-mcp-server`, not the `caged-mcp` every configuration
+example below used to invoke — so a user who followed both halves of this
+README got `command not found`.
 
 ## Usage
 
@@ -66,10 +85,10 @@ Run the MCP server locally, pointing at any directory:
 
 ```bash
 # Serve current directory over stdio (for direct MCP client connection)
-caged-mcp --mode stdio --workspace /path/to/project
+caged-mcp-server --mode stdio --workspace /path/to/project
 
 # Serve over WebSocket on port 9090
-caged-mcp --mode ws --port 9090 --workspace /path/to/project
+caged-mcp-server --mode ws --port 9090 --workspace /path/to/project
 ```
 
 ### Claude Code Configuration
@@ -79,7 +98,7 @@ Add to your `~/.claude/mcp_servers.json`:
 ```json
 {
   "caged": {
-    "command": "caged-mcp",
+    "command": "caged-mcp-server",
     "args": ["--mode", "stdio", "--workspace", "/path/to/project"]
   }
 }
@@ -93,7 +112,7 @@ Add to `.cursor/mcp.json`:
 {
   "mcpServers": {
     "caged": {
-      "command": "caged-mcp",
+      "command": "caged-mcp-server",
       "args": ["--mode", "stdio", "--workspace", "."]
     }
   }
@@ -132,10 +151,10 @@ explicitly enabled"; there is no such tool and no flag that enables one.)
 ## Building
 
 ```bash
-go build -o caged-mcp ./cmd/mcp-server
+go build -o caged-mcp-server ./cmd/mcp-server
 
 # Cross-compile for Linux
-GOOS=linux GOARCH=amd64 go build -o caged-mcp ./cmd/mcp-server
+GOOS=linux GOARCH=amd64 go build -o caged-mcp-server ./cmd/mcp-server
 ```
 
 ## Development

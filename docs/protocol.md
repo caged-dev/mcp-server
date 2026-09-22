@@ -1,6 +1,6 @@
 # Protocol Behaviour
 
-`caged-mcp` is a **dual-era** Model Context Protocol server. It serves
+`caged-mcp-server` is a **dual-era** Model Context Protocol server. It serves
 revision `2026-07-28` (current stable, stateless) and the handshake-based
 revisions `2025-11-25` and `2024-11-05` on the same process and the same
 connection, and the client's own first message decides which it gets.
@@ -92,11 +92,11 @@ small enough that a cursor would be ceremony.
 ```bash
 # Modern: no handshake at all.
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
-  | caged-mcp --mode stdio --workspace .
+  | caged-mcp-server --mode stdio --workspace .
 
 # Legacy: the handshake, and note the negotiated version in the reply.
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}' \
-  | caged-mcp --mode stdio --workspace .
+  | caged-mcp-server --mode stdio --workspace .
 ```
 
 The supported revisions are also logged at startup, so the running process
