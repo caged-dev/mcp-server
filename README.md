@@ -6,20 +6,35 @@ A standalone **Model Context Protocol (MCP)** server that exposes sandbox tools 
 
 This MCP server provides AI agents with tools to interact with an isolated sandbox environment:
 
-| Tool | Description |
-|------|-------------|
-| `filesystem_read` | Read file contents |
-| `filesystem_write` | Write/create files |
-| `filesystem_list` | List directory contents |
-| `filesystem_delete` | Remove files/directories |
-| `filesystem_search` | Search for files by pattern |
-| `terminal_exec` | Execute shell commands |
-| `terminal_interactive` | Start interactive terminal sessions |
-| `git_status` | Get git repository status |
-| `git_diff` | Show file changes |
-| `git_commit` | Create commits |
-| `git_log` | View commit history |
-| `network_fetch` | Make HTTP requests |
+| Tool | Description | Structured output |
+|------|-------------|-------------------|
+| `filesystem_read` | Read file contents | |
+| `filesystem_write` | Write/create files | |
+| `filesystem_list` | List directory contents | yes |
+| `filesystem_delete` | Remove files/directories | |
+| `filesystem_search` | Search for files by pattern | |
+| `terminal_exec` | Execute shell commands | |
+| `git_status` | Get git repository status | yes |
+| `git_diff` | Show file changes | |
+| `git_commit` | Create commits | |
+| `git_log` | View commit history | yes |
+
+Tools marked *structured output* return `structuredContent` against a
+declared `outputSchema` as well as the text block, for clients on protocol
+revision 2025-06-18 or later.
+
+`--read-only` removes `filesystem_write`, `filesystem_delete`,
+`terminal_exec` and `git_commit`.
+
+Setting `--api-key` additionally exposes the Caged platform tools —
+`pipeline_*` (list, get, create, delete, run, runs, state) and `a2a_*`
+(agents, discover, delegate, tasks). They are absent without it.
+
+*Corrected 2026-09-22: this table used to list `terminal_interactive` and
+`network_fetch`. Neither exists in this binary and neither ever has —
+`grep` for them returns nothing. They have been removed rather than
+implemented, because adding tools is a change to a surface people have
+wired into their editors.*
 
 ## Installation
 
@@ -101,9 +116,18 @@ Add to `.cursor/mcp.json`:
 The MCP server enforces:
 
 - **Path sandboxing**: All file operations are confined to the workspace directory. Path traversal (`../`) is blocked.
-- **Command allowlisting**: Optionally restrict which shell commands can be executed.
+- **Command allowlisting**: Optionally restrict which shell commands can be
+  executed. Commands run through `sh -c`, so while an allowlist is
+  configured a command containing a shell operator (`;`, `&&`, `||`, `|`,
+  `&`, `$(`, backtick, redirection or a newline) is refused outright: only
+  the first word is on the allowlist, and an allowlist that can be walked
+  past with `;` is not an allowlist. Without an allowlist nothing is
+  restricted and shell operators work as before.
 - **Read-only mode**: Disable all write operations for safe exploration.
-- **No network by default**: The `network_fetch` tool must be explicitly enabled.
+
+There is no outbound network tool in this binary, with or without an
+allowlist. (This section previously claimed `network_fetch` "must be
+explicitly enabled"; there is no such tool and no flag that enables one.)
 
 ## Building
 
@@ -124,7 +148,60 @@ golangci-lint run
 
 ## Protocol
 
-Implements the [Model Context Protocol](https://modelcontextprotocol.io) specification (version `2024-11-05`).
+Implements the [Model Context Protocol](https://modelcontextprotocol.io) as a
+**dual-era server**: revision **`2026-07-28`** (current stable, stateless),
+and the handshake-based revisions **`2025-11-25`** and **`2024-11-05`**.
+
+*Corrected 2026-09-22: this section used to state `2024-11-05` as fact. That
+was true and five revisions out of date. The current specification's
+compatibility matrix says a modern client against a legacy server "fails …
+the server may reject the request with an implementation-defined error,
+**stay silent**, or even process an era-ambiguous method under legacy
+semantics" — so the editor configurations below would have broken, silently,
+the day their clients went modern-only.*
+
+Which revision you get is decided by how your client opens the connection,
+never by configuration:
+
+| Your client sends | You get |
+|---|---|
+| `_meta.io.modelcontextprotocol/protocolVersion` on a request | that revision, served statelessly — no handshake |
+| `initialize` | the legacy handshake, negotiated down to a revision you named or older |
+| neither | `2024-11-05`, exactly as before this change |
+
+Implemented from `2026-07-28`:
+
+- per-request `_meta` (`protocolVersion`, `clientInfo`, `clientCapabilities`)
+- `server/discover`, which servers MUST implement and which dual-era clients
+  use as their era probe
+- `resultType: "complete"` on every modern result
+- `ttlMs` and `cacheScope` on `tools/list` (and on `server/discover`)
+- `UnsupportedProtocolVersionError` (`-32022`) carrying the supported list,
+  so a client can retry rather than guess
+- `io.modelcontextprotocol/serverInfo` in every modern result's `_meta`
+- deterministic tool ordering, for prompt-cache stability
+
+Not implemented, and why:
+
+- **Streamable HTTP transport.** This server offers stdio and WebSocket.
+  WebSocket has never been an MCP transport; it is what the Caged platform
+  endpoint uses. stdio — the transport every editor configuration below uses
+  — is fully conformant.
+- **`resources/*`, `prompts/*`, subscriptions, MRTR.** No tool here needs to
+  ask the client a question, so no result is ever `input_required`.
+- **`ping` is still answered in the modern era**, although `2026-07-28`
+  removes it. Clients send it as a keepalive regardless of revision, and
+  failing one would drop a working connection for no benefit.
+- **A `server/discover` probe carrying no `_meta` at all is answered**
+  rather than rejected as malformed, because refusing the era probe would
+  hide the very version list the client is asking for. Any other request
+  missing a required `_meta` field is rejected with `-32602`, as specified.
+
+### Upgrading
+
+Nothing to do. A client that handshakes today keeps getting byte-identical
+responses; `structuredContent` and `outputSchema` only appear for clients on
+`2025-06-18` or later, the revision that introduced them.
 
 ## Contributing
 
