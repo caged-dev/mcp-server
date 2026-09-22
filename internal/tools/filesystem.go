@@ -11,6 +11,10 @@ import (
 	"github.com/caged-dev/mcp-server/internal/mcp"
 )
 
+// maxSearchMatches bounds a filesystem_search result. The tool walks the
+// whole workspace, and an unbounded walk on a large tree is unbounded work.
+const maxSearchMatches = 1000
+
 // --- FileReadTool ---
 
 type FileReadTool struct{ workspace string }
@@ -232,7 +236,7 @@ func (t *FileSearchTool) Definition() mcp.ToolDefinition {
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"pattern": map[string]string{"type": "string", "description": "Glob pattern (e.g. **/*.go)"},
+				"pattern": map[string]string{"type": "string", "description": "Glob pattern, matched against each file's name (e.g. *.go, README.*). Not matched against the path, so a leading **/ matches nothing."},
 			},
 			"required": []string{"pattern"},
 		},
@@ -247,10 +251,23 @@ func (t *FileSearchTool) Execute(_ context.Context, args json.RawMessage) mcp.To
 		return errorResult("invalid arguments: " + err.Error())
 	}
 
+	if params.Pattern == "" {
+		return errorResult("pattern is required")
+	}
+	if _, err := filepath.Match(params.Pattern, "probe"); err != nil {
+		return errorResult("invalid pattern: " + err.Error())
+	}
+
 	var matches []string
+	truncated := false
 	_ = filepath.Walk(t.workspace, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
+		}
+		if len(matches) >= maxSearchMatches {
+			// A search on a large tree must not grow without bound.
+			truncated = true
+			return filepath.SkipAll
 		}
 		rel, _ := filepath.Rel(t.workspace, path)
 		matched, _ := filepath.Match(params.Pattern, filepath.Base(path))
@@ -262,6 +279,9 @@ func (t *FileSearchTool) Execute(_ context.Context, args json.RawMessage) mcp.To
 
 	if len(matches) == 0 {
 		return textResult("no matches found")
+	}
+	if truncated {
+		matches = append(matches, fmt.Sprintf("... truncated at %d matches", maxSearchMatches))
 	}
 	return textResult(strings.Join(matches, "\n"))
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -205,5 +206,39 @@ func TestFileSearchTool(t *testing.T) {
 
 	if res := tool.Execute(context.Background(), json.RawMessage(`{"pattern":"*.rs"}`)); res.Content[0].Text != "no matches found" {
 		t.Errorf("empty search = %q", res.Content[0].Text)
+	}
+}
+
+func TestFileSearchToolIsBounded(t *testing.T) {
+	ws := t.TempDir()
+	for i := 0; i < maxSearchMatches+50; i++ {
+		if err := os.WriteFile(filepath.Join(ws, "f"+strconv.Itoa(i)+".go"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := (&FileSearchTool{workspace: ws}).Execute(context.Background(), json.RawMessage(`{"pattern":"*.go"}`))
+	if res.IsError {
+		t.Fatalf("search: %s", res.Content[0].Text)
+	}
+	lines := strings.Split(res.Content[0].Text, "\n")
+	if len(lines) != maxSearchMatches+1 {
+		t.Fatalf("expected %d matches plus a truncation line, got %d lines", maxSearchMatches, len(lines))
+	}
+	if !strings.Contains(lines[len(lines)-1], "truncated") {
+		t.Errorf("last line = %q, expected a truncation notice", lines[len(lines)-1])
+	}
+}
+
+func TestFileSearchToolRejectsBadPatterns(t *testing.T) {
+	tool := &FileSearchTool{workspace: t.TempDir()}
+	for _, tc := range []struct{ name, args string }{
+		{"empty pattern", `{"pattern":""}`},
+		{"malformed pattern", `{"pattern":"[a-"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if res := tool.Execute(context.Background(), json.RawMessage(tc.args)); !res.IsError {
+				t.Errorf("expected an error result, got %q", res.Content[0].Text)
+			}
+		})
 	}
 }
