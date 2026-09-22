@@ -197,6 +197,9 @@ Not implemented, and why:
   hide the very version list the client is asking for. Any other request
   missing a required `_meta` field is rejected with `-32602`, as specified.
 
+`docs/protocol.md` has the era-selection flow, the negotiation table and the
+full list of what is and is not implemented.
+
 ### Upgrading
 
 Nothing to do. A client that handshakes today keeps getting byte-identical
