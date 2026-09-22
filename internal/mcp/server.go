@@ -94,8 +94,16 @@ func NewServer(config ServerConfig, logger *slog.Logger, tools ...Tool) *Server 
 
 // ServeStdio runs the MCP server over stdin/stdout (JSON-RPC over stdio).
 func (s *Server) ServeStdio(ctx context.Context) error {
-	reader := bufio.NewReader(os.Stdin)
-	writer := os.Stdout
+	return s.ServeStream(ctx, os.Stdin, os.Stdout)
+}
+
+// ServeStream runs the stdio wire format — one newline-delimited JSON-RPC
+// message per line — over any reader/writer pair. The specification notes
+// that nothing in the stdio binding depends on the standard streams except
+// the process lifecycle.
+func (s *Server) ServeStream(ctx context.Context, in io.Reader, out io.Writer) error {
+	reader := bufio.NewReader(in)
+	writer := out
 	state := &ConnState{}
 
 	for {
@@ -127,10 +135,14 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 	}
 }
 
-// ServeWebSocket runs the MCP server on a WebSocket endpoint.
-func (s *Server) ServeWebSocket(ctx context.Context, addr string) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+// WebSocketHandler returns the HTTP handler that upgrades a request and
+// serves MCP over the resulting connection.
+//
+// WebSocket is not an MCP transport — the specification defines stdio and
+// Streamable HTTP — but it is what the Caged platform endpoint uses and what
+// this server has always offered, so it stays.
+func (s *Server) WebSocketHandler(ctx context.Context) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			OriginPatterns: []string{"*"},
 		})
@@ -142,6 +154,12 @@ func (s *Server) ServeWebSocket(ctx context.Context, addr string) error {
 
 		s.handleWebSocket(ctx, conn)
 	})
+}
+
+// ServeWebSocket runs the MCP server on a WebSocket endpoint.
+func (s *Server) ServeWebSocket(ctx context.Context, addr string) error {
+	mux := http.NewServeMux()
+	mux.Handle("/", s.WebSocketHandler(ctx))
 
 	server := &http.Server{
 		Addr:              addr,
