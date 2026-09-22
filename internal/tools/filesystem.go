@@ -11,6 +11,10 @@ import (
 	"github.com/caged-dev/mcp-server/internal/mcp"
 )
 
+// maxSearchMatches bounds a filesystem_search result. The tool walks the
+// whole workspace, and an unbounded walk on a large tree is unbounded work.
+const maxSearchMatches = 1000
+
 // --- FileReadTool ---
 
 type FileReadTool struct{ workspace string }
@@ -108,7 +112,39 @@ func (t *FileListTool) Definition() mcp.ToolDefinition {
 				"path": map[string]string{"type": "string", "description": "Directory path relative to workspace"},
 			},
 		},
+		OutputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path": map[string]string{"type": "string", "description": "Directory listed, relative to the workspace"},
+				"entries": map[string]interface{}{
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"name": map[string]string{"type": "string"},
+							"type": map[string]interface{}{"type": "string", "enum": []string{"file", "directory"}},
+							"size": map[string]string{"type": "integer", "description": "Size in bytes as reported by the filesystem"},
+						},
+						"required": []string{"name", "type", "size"},
+					},
+				},
+			},
+			"required": []string{"path", "entries"},
+		},
 	}
+}
+
+// FileEntry is one row of a filesystem_list result.
+type FileEntry struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int64  `json:"size"`
+}
+
+// FileListOutput is the structured result of filesystem_list.
+type FileListOutput struct {
+	Path    string      `json:"path"`
+	Entries []FileEntry `json:"entries"`
 }
 
 func (t *FileListTool) Execute(_ context.Context, args json.RawMessage) mcp.ToolCallResult {
@@ -131,20 +167,24 @@ func (t *FileListTool) Execute(_ context.Context, args json.RawMessage) mcp.Tool
 	}
 
 	var lines []string
+	out := FileListOutput{Path: params.Path, Entries: make([]FileEntry, 0, len(entries))}
 	for _, e := range entries {
 		info, _ := e.Info()
 		prefix := "  "
+		kind := "file"
 		if e.IsDir() {
 			prefix = "d "
+			kind = "directory"
 		}
 		size := int64(0)
 		if info != nil {
 			size = info.Size()
 		}
 		lines = append(lines, fmt.Sprintf("%s%8d  %s", prefix, size, e.Name()))
+		out.Entries = append(out.Entries, FileEntry{Name: e.Name(), Type: kind, Size: size})
 	}
 
-	return textResult(strings.Join(lines, "\n"))
+	return structuredResult(strings.Join(lines, "\n"), out)
 }
 
 // --- FileDeleteTool ---
@@ -196,7 +236,7 @@ func (t *FileSearchTool) Definition() mcp.ToolDefinition {
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"pattern": map[string]string{"type": "string", "description": "Glob pattern (e.g. **/*.go)"},
+				"pattern": map[string]string{"type": "string", "description": "Glob pattern, matched against each file's name (e.g. *.go, README.*). Not matched against the path, so a leading **/ matches nothing."},
 			},
 			"required": []string{"pattern"},
 		},
@@ -211,10 +251,23 @@ func (t *FileSearchTool) Execute(_ context.Context, args json.RawMessage) mcp.To
 		return errorResult("invalid arguments: " + err.Error())
 	}
 
+	if params.Pattern == "" {
+		return errorResult("pattern is required")
+	}
+	if _, err := filepath.Match(params.Pattern, "probe"); err != nil {
+		return errorResult("invalid pattern: " + err.Error())
+	}
+
 	var matches []string
+	truncated := false
 	_ = filepath.Walk(t.workspace, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
+		}
+		if len(matches) >= maxSearchMatches {
+			// A search on a large tree must not grow without bound.
+			truncated = true
+			return filepath.SkipAll
 		}
 		rel, _ := filepath.Rel(t.workspace, path)
 		matched, _ := filepath.Match(params.Pattern, filepath.Base(path))
@@ -226,6 +279,9 @@ func (t *FileSearchTool) Execute(_ context.Context, args json.RawMessage) mcp.To
 
 	if len(matches) == 0 {
 		return textResult("no matches found")
+	}
+	if truncated {
+		matches = append(matches, fmt.Sprintf("... truncated at %d matches", maxSearchMatches))
 	}
 	return textResult(strings.Join(matches, "\n"))
 }
@@ -256,6 +312,33 @@ func safePath(workspace, relPath string) (string, error) {
 		return "", fmt.Errorf("path traversal blocked: %s", relPath)
 	}
 	return resolved, nil
+}
+
+// structuredResult returns a tool result carrying both the human-readable
+// text and its machine-readable form. `structuredContent` was introduced in
+// protocol revision 2025-06-18; the server drops it for sessions negotiated
+// below that. The text block is always present, which is what the
+// specification asks of a tool that returns structured content.
+func structuredResult(text string, payload interface{}) mcp.ToolCallResult {
+	res := textResult(text)
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// A result the caller can still read beats an error: the text block
+		// carries the same information.
+		return res
+	}
+	res.StructuredContent = raw
+	return res
+}
+
+// withStructured attaches a machine-readable payload to an existing result.
+func withStructured(res mcp.ToolCallResult, payload interface{}) mcp.ToolCallResult {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return res
+	}
+	res.StructuredContent = raw
+	return res
 }
 
 func textResult(text string) mcp.ToolCallResult {

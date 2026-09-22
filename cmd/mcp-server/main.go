@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -77,9 +78,12 @@ func main() {
 
 	// Create server.
 	server := mcp.NewServer(mcp.ServerConfig{
-		Name:    "caged-mcp",
-		Version: version,
+		Name:         "caged-mcp",
+		Version:      version,
+		Instructions: "Filesystem, terminal and git tools scoped to a single workspace directory. All paths are relative to the workspace root; paths outside it are refused.",
 	}, logger, toolSet.All()...)
+
+	logger.Info("protocol versions", "supported", mcp.SupportedVersions())
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -104,21 +108,25 @@ func main() {
 	}
 }
 
+// resolveWorkspace turns the --workspace flag into a clean absolute path and
+// refuses anything that is not an existing directory. Failing at startup with
+// one message beats failing on every tool call with ten.
 func resolveWorkspace(path string) (string, error) {
 	if path == "" {
 		path = "."
 	}
-	abs, err := os.Getwd()
+	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolving workspace path: %w", err)
 	}
-	if path == "." {
-		return abs, nil
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("checking workspace: %w", err)
 	}
-	if path[0] == '/' {
-		return path, nil
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace %s is not a directory", abs)
 	}
-	return abs + "/" + path, nil
+	return abs, nil
 }
 
 func envOrDefault(key, def string) string {

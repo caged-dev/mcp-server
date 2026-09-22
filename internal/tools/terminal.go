@@ -12,6 +12,20 @@ import (
 	"github.com/caged-dev/mcp-server/internal/mcp"
 )
 
+// shellOperators are the constructs that let one `sh -c` string run a
+// program other than the one it starts with.
+var shellOperators = []string{";", "&&", "||", "|", "&", "$(", "`", "\n", ">", "<", "\r"}
+
+// shellOperator returns the first shell operator found in a command, or "".
+func shellOperator(command string) string {
+	for _, op := range shellOperators {
+		if strings.Contains(command, op) {
+			return op
+		}
+	}
+	return ""
+}
+
 // TerminalExecTool executes shell commands.
 type TerminalExecTool struct {
 	workspace string
@@ -48,7 +62,19 @@ func (t *TerminalExecTool) Execute(ctx context.Context, args json.RawMessage) mc
 
 	// Check allowlist.
 	if len(t.allowed) > 0 {
-		cmdName := strings.Fields(params.Command)[0]
+		fields := strings.Fields(params.Command)
+		if len(fields) == 0 {
+			return errorResult("command is required")
+		}
+		// The command runs through `sh -c`, so a shell operator turns one
+		// command into several and only the first is checked. An allowlist
+		// that can be walked past with `;` is not an allowlist, so a
+		// command that chains, pipes or substitutes is refused outright
+		// while one is configured.
+		if op := shellOperator(params.Command); op != "" {
+			return errorResult(fmt.Sprintf("shell operator %q is not permitted while an allowlist is configured", op))
+		}
+		cmdName := fields[0]
 		allowed := false
 		for _, a := range t.allowed {
 			if a == cmdName {
